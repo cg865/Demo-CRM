@@ -57,6 +57,9 @@ jobs:
     - name: Create .kube directory
       run: mkdir -p $HOME/.kube
 
+    - name: Test base64 decode
+      run: |
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d | head -n 5
         
     - name: Configure kubectl for Killercoda
       run: |
