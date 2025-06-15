@@ -57,21 +57,18 @@ jobs:
     - name: Create .kube directory
       run: mkdir -p $HOME/.kube
 
-    - name: Test base64 decode
+    - name: Decode and save kubeconfig
       run: |
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d | head -n 20
-        
-    - name: Configure kubectl for Killercoda
-      run: |
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 --decode > $HOME/.kube/config
         chmod 600 $HOME/.kube/config
-        
-    - name: Verify Killercoda connection
+        echo " kubeconfig written to $HOME/.kube/config"
+
+    - name: Test connection to Killercoda cluster
       run: |
-        echo "=== Connecting to Killercoda cluster ==="
-        kubectl cluster-info
+        echo "===  Verifying Killercoda connection ==="
+        kubectl version --short
+        kubectl config current-context
         kubectl get nodes
-        echo "Connected to Killercoda successfully"
         
     - name: Prepare deployment manifest
       run: |
