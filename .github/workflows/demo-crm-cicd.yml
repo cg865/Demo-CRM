@@ -59,7 +59,7 @@ jobs:
 
     - name: Test base64 decode
       run: |
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d | head -n 5
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d | head -n 20
         
     - name: Configure kubectl for Killercoda
       run: |
