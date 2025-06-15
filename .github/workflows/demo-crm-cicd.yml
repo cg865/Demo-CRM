@@ -1,0 +1,141 @@
+name: Demo CRM CI/CD to Killercoda (GHCR)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: demo-crm
+
+jobs:
+  deploy-to-killercoda:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Generate image tag
+      id: generate-tag
+      run: |
+        TAG="build-$(date +%Y%m%d)-${GITHUB_SHA:0:7}"
+        echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        echo "Generated tag: ${TAG}"
+        
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GHCR_TOKEN }}
+        
+    - name: Pull, retag and push Demo CRM image
+      run: |
+        TAG="${{ steps.generate-tag.outputs.tag }}"
+        IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+        
+        echo "Pulling original image..."
+        docker pull pwstaging/demo-crm:latest
+        
+        echo "Retagging image..."
+        docker tag pwstaging/demo-crm:latest ${IMAGE_NAME}:${TAG}
+        docker tag pwstaging/demo-crm:latest ${IMAGE_NAME}:latest
+        
+        echo "Pushing images..."
+        docker push ${IMAGE_NAME}:${TAG}
+        docker push ${IMAGE_NAME}:latest
+        
+        echo "Images pushed successfully"
+        
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+        
+    - name: Configure kubectl for Killercoda
+      run: |
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+        
+    - name: Verify Killercoda connection
+      run: |
+        echo "=== Connecting to Killercoda cluster ==="
+        kubectl cluster-info
+        kubectl get nodes
+        echo "Connected to Killercoda successfully"
+        
+    - name: Prepare deployment manifest
+      run: |
+        TAG="${{ steps.generate-tag.outputs.tag }}"
+        IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${TAG}"
+        
+        echo "Updating deployment with image: ${IMAGE}"
+        sed -i "s|IMAGE_PLACEHOLDER|${IMAGE}|g" k8s/deployment.yaml
+        
+        echo "=== Updated Deployment Manifest ==="
+        cat k8s/deployment.yaml
+        
+    - name: Deploy Demo CRM Application
+      run: |
+        echo "=== Deploying Demo CRM ==="
+        
+        kubectl apply -f k8s/deployment.yaml
+        
+        echo "Waiting for Demo CRM deployment..."
+        kubectl wait --for=condition=available deployment/demo-crm --timeout=300s
+        
+        echo "Demo CRM deployed successfully"
+        
+    - name: Verify deployment
+      run: |
+        echo "=== Deployment Verification ==="
+        
+        kubectl get all
+        echo ""
+        
+        echo "=== Pod Status ==="
+        kubectl get pods -l app=demo-crm
+        echo ""
+        
+        echo "=== Testing Application ==="
+        kubectl port-forward deployment/demo-crm 3000:3000 &
+        PORT_FORWARD_PID=$!
+        
+        sleep 15
+        
+        if curl -f http://localhost:3000/; then
+          echo "Application is responding correctly"
+        else
+          echo "Application test failed"
+          kubectl logs -l app=demo-crm --tail=20
+          exit 1
+        fi
+        
+        kill $PORT_FORWARD_PID
+        
+    - name: Display access information
+      run: |
+        echo "=== Deployment Complete ==="
+        echo ""
+        echo "Your Demo CRM application is now running in Killercoda!"
+        echo ""
+        echo "Resource Status:"
+        kubectl get pods,deployments -l app=demo-crm
+        echo ""
+        echo "Access Instructions:"
+        echo "1. Run the following command in your Killercoda terminal:"
+        echo "   kubectl port-forward --address 0.0.0.0 deployment/demo-crm 3000:3000"
+        echo ""
+        echo "2. Use Killercoda Traffic Port Accessor:"
+        echo "   - Click three bars (☰) in top-right corner"
+        echo "   - Select 'Ports'"
+        echo "   - Enter '3000' in Custom Ports"
+        echo "   - Click 'Access'"
+        echo ""
+        echo "3. You should see the Demo CRM interface with two customer cards"
+        echo ""
+        echo "Deployed Image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.generate-tag.outputs.tag }}"
+        echo ""
+        echo "Session Info: This deployment is active for the duration of your Killercoda session"
