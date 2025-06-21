@@ -23,12 +23,30 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GHCR_TOKEN }}
 
-    - name: Build and push Docker image
+    - name: Pull, retag and push Demo CRM image
       run: |
-        IMAGE=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-        TAG=latest
+        TAG="${{ steps.generate-tag.outputs.tag }}"
+        IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+        
+        echo "Pulling original image..."
+        docker pull pwstaging/demo-crm:latest
+        
+        echo "Retagging image..."
+        docker tag pwstaging/demo-crm:latest ${IMAGE_NAME}:${TAG}
+        docker tag pwstaging/demo-crm:latest ${IMAGE_NAME}:latest
+        
+        echo "Pushing images..."
+        docker push ${IMAGE_NAME}:${TAG}
+        docker push ${IMAGE_NAME}:latest
+        
+        echo "Images pushed successfully"
 
-        docker build -t $IMAGE:$TAG .
-        docker push $IMAGE:$TAG
+    # - name: Build and push Docker image
+    #   run: |
+    #     IMAGE=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+    #     TAG=latest
 
-        echo "Image pushed: $IMAGE:$TAG"
+    #     docker build -t $IMAGE:$TAG .
+    #     docker push $IMAGE:$TAG
+
+    #     echo "Image pushed: $IMAGE:$TAG"
