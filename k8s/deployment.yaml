@@ -14,6 +14,8 @@ spec:
       labels:
         app: demo-crm
     spec:
+      imagePullSecrets:
+        - name: ghcr
       containers:
         - name: demo-crm
           image: IMAGE_PLACEHOLDER
