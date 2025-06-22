@@ -1,4 +1,4 @@
-name: Demo CRM CI/CD to Killercoda (GHCR)
+name: Demo CRM CI/CD Pipeline (GHCR)
 
 on:
   push:
@@ -10,7 +10,7 @@ env:
   IMAGE_NAME: demo-crm
 
 jobs:
-  deploy-to-killercoda:
+  ci-cd-pipeline:
     runs-on: ubuntu-latest
     
     steps:
@@ -34,8 +34,10 @@ jobs:
     - name: Pull, retag and push Demo CRM image
       run: |
         TAG="${{ steps.generate-tag.outputs.tag }}"
-        IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+        REPO_OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+        IMAGE_NAME="${{ env.REGISTRY }}/${REPO_OWNER_LOWER}/${{ env.IMAGE_NAME }}"
         
+        echo "=== CI: Building and Publishing Image ==="
         echo "Pulling original image..."
         docker pull pwstaging/demo-crm:latest
         
@@ -47,72 +49,56 @@ jobs:
         docker push ${IMAGE_NAME}:${TAG}
         docker push ${IMAGE_NAME}:latest
         
-        echo "Images pushed successfully"
+        echo "Images pushed successfully to GHCR"
         
-    - name: Setup kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'v1.28.0'
-
-    - name: Create .kube directory
-      run: mkdir -p $HOME/.kube
-
-    - name: Decode and save kubeconfig
+    - name: Create kind cluster for testing
       run: |
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d | head -n 20
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
-        echo "${{ secrets.KUBE_CONFIG }}" | base64 --decode > $HOME/.kube/config
-        chmod 600 $HOME/.kube/config
-        echo " kubeconfig written to $HOME/.kube/config"
-
-    - name: Test connection to Killercoda cluster
-      run: |
-        echo "===  Verifying Killercoda connection ==="
-        kubectl version --short
-        kubectl config current-context
+        echo "=== CD: Creating Test Environment ==="
+        # Install kind
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+        
+        # Create cluster
+        kind create cluster --wait 300s
+        
+        echo "Test cluster created successfully"
+        kubectl cluster-info
         kubectl get nodes
         
-    - name: Prepare deployment manifest
+    - name: Prepare and test deployment
       run: |
         TAG="${{ steps.generate-tag.outputs.tag }}"
-        IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${TAG}"
+        REPO_OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+        IMAGE="${{ env.REGISTRY }}/${REPO_OWNER_LOWER}/${{ env.IMAGE_NAME }}:${TAG}"
         
+        echo "=== CD: Testing Deployment ==="
         echo "Updating deployment with image: ${IMAGE}"
         sed -i "s|IMAGE_PLACEHOLDER|${IMAGE}|g" k8s/deployment.yaml
         
-        echo "=== Updated Deployment Manifest ==="
-        cat k8s/deployment.yaml
-        
-    - name: Deploy Demo CRM Application
-      run: |
-        echo "=== Deploying Demo CRM ==="
-        
+        echo "Deploying to test environment..."
         kubectl apply -f k8s/deployment.yaml
         
-        echo "Waiting for Demo CRM deployment..."
+        echo "Waiting for deployment..."
         kubectl wait --for=condition=available deployment/demo-crm --timeout=300s
         
-        echo "Demo CRM deployed successfully"
+        echo "Deployment test successful"
         
-    - name: Verify deployment
+    - name: Verify deployment works
       run: |
-        echo "=== Deployment Verification ==="
+        echo "=== CD: Verifying Application ==="
         
         kubectl get all
         echo ""
         
-        echo "=== Pod Status ==="
-        kubectl get pods -l app=demo-crm
-        echo ""
-        
-        echo "=== Testing Application ==="
+        echo "Testing application connectivity..."
         kubectl port-forward deployment/demo-crm 3000:3000 &
         PORT_FORWARD_PID=$!
         
         sleep 15
         
         if curl -f http://localhost:3000/; then
-          echo "Application is responding correctly"
+          echo "Application is responding correctly!"
         else
           echo "Application test failed"
           kubectl logs -l app=demo-crm --tail=20
@@ -121,27 +107,49 @@ jobs:
         
         kill $PORT_FORWARD_PID
         
-    - name: Display access information
+    - name: Display deployment instructions
       run: |
-        echo "=== Deployment Complete ==="
+        TAG="${{ steps.generate-tag.outputs.tag }}"
+        REPO_OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+        
+        echo "=== CI/CD Pipeline Complete ==="
         echo ""
-        echo "Your Demo CRM application is now running in Killercoda!"
+        echo "CI (Continuous Integration) Results:"
+        echo "   Image built: ghcr.io/${REPO_OWNER_LOWER}/${{ env.IMAGE_NAME }}:${TAG}"
+        echo "   Image pushed to GHCR: ghcr.io/${REPO_OWNER_LOWER}/${{ env.IMAGE_NAME }}:latest"
+        echo "   Registry URL: https://github.com/${{ github.repository }}/pkgs/container/${{ env.IMAGE_NAME }}"
         echo ""
-        echo "Resource Status:"
-        kubectl get pods,deployments -l app=demo-crm
+        echo "CD (Continuous Deployment) Results:"
+        echo "   Deployment tested in ephemeral cluster"
+        echo "   Application health verified"
+        echo "   Ready for manual production deployment"
         echo ""
-        echo "Access Instructions:"
-        echo "1. Run the following command in your Killercoda terminal:"
+        echo "=== Manual Deployment to Killercoda ==="
+        echo ""
+        echo "Your image is ready! To deploy to Killercoda:"
+        echo ""
+        echo "1. In your Killercoda terminal, run:"
+        echo "   git clone https://github.com/${{ github.repository }}.git"
+        echo "   cd demo-crm"
+        echo ""
+        echo "2. Update the deployment image:"
+        echo "   sed -i 's|IMAGE_PLACEHOLDER|ghcr.io/${REPO_OWNER_LOWER}/${{ env.IMAGE_NAME }}:${TAG}|g' k8s/deployment.yaml"
+        echo ""
+        echo "3. Deploy the application:"
+        echo "   kubectl apply -f k8s/deployment.yaml"
+        echo "   kubectl wait --for=condition=available deployment/demo-crm --timeout=300s"
+        echo ""
+        echo "4. Access your application:"
         echo "   kubectl port-forward --address 0.0.0.0 deployment/demo-crm 3000:3000"
         echo ""
-        echo "2. Use Killercoda Traffic Port Accessor:"
-        echo "   - Click three bars (☰) in top-right corner"
-        echo "   - Select 'Ports'"
-        echo "   - Enter '3000' in Custom Ports"
-        echo "   - Click 'Access'"
+        echo "5. Use Killercoda Traffic Port Accessor:"
+        echo "   - Click three bars in top-right corner"
+        echo "   - Select 'Ports' -> Enter '3000' -> Click 'Access'"
         echo ""
-        echo "3. You should see the Demo CRM interface with two customer cards"
+        echo "6. Success: You should see Demo CRM with two customer cards!"
         echo ""
-        echo "Deployed Image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.generate-tag.outputs.tag }}"
-        echo ""
-        echo "Session Info: This deployment is active for the duration of your Killercoda session"
+        echo "=== Why This Approach? ==="
+        echo "- Automated Testing: Proves your deployment works before manual steps"
+        echo "- Professional Practice: Separates CI/CD testing from production deployment"
+        echo "- Learning Value: Experience both automated and manual deployment workflows"
+        echo "- Cost Effective: Uses free tools (kind + GitHub Actions + Killercoda)"
