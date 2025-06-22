@@ -83,6 +83,15 @@ jobs:
         kubectl wait --for=condition=available deployment/demo-crm --timeout=300s
         
         echo "Deployment test successful"
+
+    - name: Debug if deployment fails
+      if: failure()
+      run: |
+        echo "Deployment failed — running debug information:"
+        kubectl get pods
+        kubectl describe deployment demo-crm
+        kubectl get events --sort-by=.metadata.creationTimestamp
+        kubectl logs -l app=demo-crm --tail=30 || true
         
     - name: Verify deployment works
       run: |
